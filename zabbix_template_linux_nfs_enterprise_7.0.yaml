@@ -1,0 +1,2189 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+  - uuid: 846977d1dfed4968bc5f8bdb363285bc
+    name: Templates/Operating systems
+  templates:
+  - uuid: 7274ab78044d4a488dc0c5942d8bb620
+    template: Linux NFS by Zabbix agent active
+    name: Linux NFS by Zabbix agent active
+    description: "Enterprise plug-and-play NFS monitoring for Linux (v2.0.0).\n\nDefault monitoring is intentionally small and requires no per-host customization:\n- discovers active NFS/NFSv4 mounts automatically;\n- verifies persistent mounts defined in /etc/fstab;\n- detects missing mounts, wrong sources and read-only filesystems;\n- monitors capacity and forecasts exhaustion;\n- discovers NFS servers and checks TCP/2049 from the monitored client.\n\nOptional modules:\n- {$NFS.PERFORMANCE}=1 creates client-side /proc/self/mountstats performance metrics\n  (throughput, operations, RTT, execution time, queue time, retransmissions and errors).\n- {$NFS.RPC.DEEP}=1 creates functional NFSv3 rpcinfo checks for rpcbind, mountd, NFS and NLM.\n\nThe standard layer needs no UserParameter, external scripts or host-specific NFS macros.\nRPC Deep Health requires rpcinfo and a tightly-scoped system.run[] AllowKey.\nRaw topology/performance master items are not retained in history.\n"
+    groups:
+    - name: Templates/Operating systems
+    items:
+    - uuid: 4df544e2fb39429db094d2167e9678d1
+      name: 'NFS topology: current mounts raw'
+      type: ZABBIX_ACTIVE
+      key: vfs.file.contents[/proc/self/mounts]
+      delay: 1m
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Raw Linux mount table used as the master item for NFS topology, availability and metadata discovery.
+      preprocessing:
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - 5m
+      tags:
+      - tag: component
+        value: nfs
+      - tag: scope
+        value: raw
+    - uuid: ad46677e5a554dcabc08674982a87df5
+      name: 'NFS topology: fstab raw'
+      type: ZABBIX_ACTIVE
+      key: vfs.file.contents[/etc/fstab]
+      delay: 10m
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Raw /etc/fstab used to determine which persistent NFS mounts are expected on this host.
+      preprocessing:
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - 1h
+      tags:
+      - tag: component
+        value: nfs
+      - tag: scope
+        value: raw
+    - uuid: 4ea69d40e27f419aa0971a42be73dbfb
+      name: 'NFS performance: mountstats raw'
+      type: ZABBIX_ACTIVE
+      key: vfs.file.contents[/proc/self/mountstats]
+      delay: 1m
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Raw kernel per-mount NFS client statistics. Used only as a master item for dependent performance metrics.
+      tags:
+      - tag: component
+        value: nfs
+      - tag: scope
+        value: raw
+    discovery_rules:
+    - uuid: f42b4b04ba1d4241be2f49472b6d1d19
+      name: NFS mounts discovery (core)
+      type: DEPENDENT
+      key: nfs.mounts.discovery
+      delay: '0'
+      description: Core NFS discovery. Always enabled. Discovers active NFS/NFSv4 mounts and creates only availability, topology and capacity items. Advanced /proc/self/mountstats metrics are created by the separate optional performance discovery.
+      lifetime: 30d
+      lifetime_type: DELETE_AFTER
+      enabled_lifetime: 1d
+      enabled_lifetime_type: DISABLE_AFTER
+      item_prototypes:
+      - uuid: 42005a0f033b4c89b909c9a76aaef927
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Mount status'
+        type: DEPENDENT
+        key: nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"]
+        history: 7d
+        trends: 90d
+        description: Independent check that the exact NFS source is still mounted on the discovered mountpoint. This prevents false filesystem-capacity readings after an unmount.
+        valuemap:
+          name: NFS availability state
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar targetSource = '{#NFS_SOURCE}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount && decodeOctal(f[0]) === targetSource) return 1;\n}\nreturn 0;"
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: d1c5e73e412247339d86dff102414893
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Mount options'
+        type: DEPENDENT
+        key: nfs.mount.options["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"]
+        history: 1d
+        trends: '0'
+        value_type: TEXT
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar targetSource = '{#NFS_SOURCE}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount && decodeOctal(f[0]) === targetSource) return decodeOctal(f[3]);\n}\nreturn '';"
+        - type: DISCARD_UNCHANGED_HEARTBEAT
+          parameters:
+          - 1d
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 272daf65ce2c4529803a4a86644c62a2
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Read-only state'
+        type: DEPENDENT
+        key: nfs.mount.readonly["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"]
+        history: 7d
+        trends: 90d
+        valuemap:
+          name: NFS read-only state
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar targetSource = '{#NFS_SOURCE}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount && decodeOctal(f[0]) === targetSource) {\n        var opts = ',' + decodeOctal(f[3]) + ',';\n        return opts.indexOf(',ro,') >= 0 ? 1 : 0;\n    }\n}\nreturn 0;"
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 3d449f7d24b1403cb101b9b21800e724
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Total space'
+        type: ZABBIX_ACTIVE
+        key: vfs.fs.size["{#NFS_MOUNTPOINT}",total]
+        delay: 5m
+        history: 7d
+        trends: 365d
+        units: B
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 3fd6319e1c864cdf9008587dae2489ae
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Used space'
+        type: ZABBIX_ACTIVE
+        key: vfs.fs.size["{#NFS_MOUNTPOINT}",used]
+        delay: 5m
+        history: 7d
+        trends: 365d
+        units: B
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 5758e87efdc041c4ab5fe38ffb4e0eda
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Free space'
+        type: ZABBIX_ACTIVE
+        key: vfs.fs.size["{#NFS_MOUNTPOINT}",free]
+        delay: 5m
+        history: 7d
+        trends: 365d
+        units: B
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 658ff99115964113b860ec94c93320b1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Used space, %'
+        type: ZABBIX_ACTIVE
+        key: vfs.fs.size["{#NFS_MOUNTPOINT}",pused]
+        delay: 5m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 4651a1fedf5e4070b2402a21b1a89288
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Current source'
+        type: DEPENDENT
+        key: nfs.mount.source.current["{#NFS_MOUNTPOINT}"]
+        history: 1d
+        trends: '0'
+        value_type: TEXT
+        description: Current NFS source mounted on the mountpoint. Key intentionally excludes the source so a source change preserves item history and can be detected.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount) {\n        return decodeOctal(f[0]);\n    }\n}\nreturn '';"
+        - type: DISCARD_UNCHANGED_HEARTBEAT
+          parameters:
+          - 1h
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 0d7da4e015a147caa788eca3177d8c32
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Current NFS version'
+        type: DEPENDENT
+        key: nfs.mount.version.current["{#NFS_MOUNTPOINT}"]
+        history: 1d
+        trends: '0'
+        value_type: CHAR
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount) {\n        var opts = decodeOctal(f[3]);\n        var m = opts.match(/(?:^|,)(?:vers|nfsvers)=([^,]+)/);\n        return m ? m[1] : (f[2] === 'nfs4' ? '4' : 'unknown');\n    }\n}\nreturn '';"
+        - type: DISCARD_UNCHANGED_HEARTBEAT
+          parameters:
+          - 1h
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: d008e91eef69496c9d2c4ce154903023
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Current transport protocol'
+        type: DEPENDENT
+        key: nfs.mount.proto.current["{#NFS_MOUNTPOINT}"]
+        history: 1d
+        trends: '0'
+        value_type: CHAR
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount) {\n        var opts = decodeOctal(f[3]);\n        var m = opts.match(/(?:^|,)proto=([^,]+)/);\n        return m ? m[1] : 'tcp';\n    }\n}\nreturn '';"
+        - type: DISCARD_UNCHANGED_HEARTBEAT
+          parameters:
+          - 1h
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      trigger_prototypes:
+      - uuid: 0bd81fe3ba404224b2d251549e9d0852
+        expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=0
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Mount disappeared'
+        priority: INFO
+        description: The NFS mount that was previously discovered is no longer mounted with the same source. Persistent mounts declared in /etc/fstab are covered by a separate HIGH-severity expected-mount trigger.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: availability
+      - uuid: 31cfcb715c5b43a489b510fd35572067
+        expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and (avg(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",pused],15m)>{$NFS.SPACE.CRIT:"{#NFS_MOUNTPOINT}"} or max(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",free],15m)<{$NFS.MIN.FREE:"{#NFS_MOUNTPOINT}"})
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Space is critically low'
+        priority: HIGH
+        description: Critical if used percentage exceeds the configured threshold OR free bytes stay below the configured absolute minimum. The condition is evaluated only while the exact NFS mount is present.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: capacity
+      - uuid: 8373c37b31a446ddb9217feb26102957
+        expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and avg(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",pused],15m)>{$NFS.SPACE.WARN:"{#NFS_MOUNTPOINT}"}
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Space usage is high'
+        priority: WARNING
+        dependencies:
+        - name: 'NFS [{#NFS_MOUNTPOINT}]: Space is critically low'
+          expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and (avg(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",pused],15m)>{$NFS.SPACE.CRIT:"{#NFS_MOUNTPOINT}"} or max(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",free],15m)<{$NFS.MIN.FREE:"{#NFS_MOUNTPOINT}"})
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: capacity
+      - uuid: 037c07827447404b80a7499af4672c42
+        expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and timeleft(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",free],1h,0)>0 and timeleft(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",free],1h,0)<{$NFS.FORECAST.DAYS:"{#NFS_MOUNTPOINT}"}
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Predicted to run out of free space'
+        priority: WARNING
+        description: Linear prediction based on the last hour of free-space history estimates exhaustion within {$NFS.FORECAST.DAYS:"{#NFS_MOUNTPOINT}"}.
+        dependencies:
+        - name: 'NFS [{#NFS_MOUNTPOINT}]: Space is critically low'
+          expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and (avg(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",pused],15m)>{$NFS.SPACE.CRIT:"{#NFS_MOUNTPOINT}"} or max(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",free],15m)<{$NFS.MIN.FREE:"{#NFS_MOUNTPOINT}"})
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: capacity
+      - uuid: 34383b1d2b2b4b04b52bdbe231ca554e
+        expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and nodata(/Linux NFS by Zabbix agent active/vfs.fs.size["{#NFS_MOUNTPOINT}",pused],20m)=1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Mounted but filesystem metrics are unavailable'
+        priority: HIGH
+        description: The NFS entry is still present in the Linux mount table but the agent has not produced filesystem capacity data for 20 minutes. This detects stale/hung NFS mounts that remain listed as mounted.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: availability
+        dependencies:
+        - name: 'NFS [{#NFS_MOUNTPOINT}]: Mount disappeared'
+          expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=0
+          recovery_expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1
+      - uuid: 69be9988b2b848cfb3bf3dc981f6a29b
+        expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and last(/Linux NFS by Zabbix agent active/nfs.mount.readonly["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Filesystem is read-only'
+        priority: HIGH
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: availability
+        dependencies:
+        - name: 'NFS [{#NFS_MOUNTPOINT}]: Mount disappeared'
+          expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=0
+          recovery_expression: last(/Linux NFS by Zabbix agent active/nfs.mount.status["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1
+      graph_prototypes:
+      - uuid: 0a6a267a2847484586d15c82330a19b0
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Space usage'
+        graph_items:
+        - color: 1A7C11
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: vfs.fs.size["{#NFS_MOUNTPOINT}",used]
+        - sortorder: '1'
+          color: 2774A4
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: vfs.fs.size["{#NFS_MOUNTPOINT}",free]
+      master_item:
+        key: vfs.file.contents[/proc/self/mounts]
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) {\n        return String.fromCharCode(parseInt(oct, 8));\n    });\n}\nfunction splitSource(source) {\n    var pos = source.indexOf(':/');\n    if (pos < 0) return {server: source, exportPath: ''};\n    var server = source.substring(0, pos);\n    var exportPath = source.substring(pos + 1);\n    if (server.length > 1 && server.charAt(0) === '[' && server.charAt(server.length - 1) === ']')\n        server = server.substring(1, server.length - 1);\n    return {server: server, exportPath: exportPath};\n}\nfunction opt(options, name) {\n    var re = new RegExp('(?:^|,)' + name + '=([^,]+)');\n    var m = options.match(re);\n    return m ? m[1] : '';\n}\nvar out = [];\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var line = lines[i].trim();\n    if (!line) continue;\n    var f = line.split(/\\s+/);\n    if (f.length < 4) continue;\n    var source = decodeOctal(f[0]);\n    var mountpoint = decodeOctal(f[1]);\n    var fstype = f[2];\n    var options = decodeOctal(f[3]);\n    if (fstype !== 'nfs' && fstype !== 'nfs4') continue;\n    var src = splitSource(source);\n    var version = opt(options, 'vers') || opt(options, 'nfsvers') || (fstype === 'nfs4' ? '4' : 'unknown');\n    var proto = opt(options, 'proto') || 'tcp';\n    var mountaddr = opt(options, 'mountaddr') || src.server;\n    var mountport = opt(options, 'mountport');\n    var mountproto = opt(options, 'mountproto') || proto;\n    out.push({\n        '{#NFS_SOURCE}': source,\n        '{#NFS_SERVER}': src.server,\n        '{#NFS_EXPORT}': src.exportPath,\n        '{#NFS_MOUNTPOINT}': mountpoint,\n        '{#NFS_FSTYPE}': fstype,\n        '{#NFS_VERSION}': version,\n        '{#NFS_PROTO}': proto,\n        '{#NFS_MOUNTADDR}': mountaddr,\n        '{#NFS_MOUNTPORT}': mountport,\n        '{#NFS_MOUNTPROTO}': mountproto\n    });\n}\nreturn JSON.stringify(out);"
+    - uuid: d57f6c452feb4fee89514d318f7b7da0
+      name: NFS expected mounts discovery
+      type: DEPENDENT
+      key: nfs.expected.discovery
+      delay: '0'
+      description: Discovers persistent NFS/NFSv4 entries in /etc/fstab and verifies that each expected filesystem is mounted from the configured source. Entries using noauto or x-systemd.automount are intentionally ignored.
+      lifetime: 30d
+      lifetime_type: DELETE_AFTER
+      enabled_lifetime: 1d
+      enabled_lifetime_type: DISABLE_AFTER
+      item_prototypes:
+      - uuid: cf216e2f237147d7996d11f82facd251
+        name: 'NFS expected [{#NFS_MOUNTPOINT}]: Mounted'
+        type: DEPENDENT
+        key: nfs.expected.mounted["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"]
+        history: 7d
+        trends: 90d
+        valuemap:
+          name: NFS availability state
+        description: Returns 1 when any NFS/NFSv4 filesystem is currently mounted at the mountpoint declared in /etc/fstab.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount) return 1;\n}\nreturn 0;"
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      - uuid: 89edb5ca5547479bb4018f1283db9959
+        name: 'NFS expected [{#NFS_MOUNTPOINT}]: Correct source'
+        type: DEPENDENT
+        key: nfs.expected.source.ok["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"]
+        history: 7d
+        trends: 90d
+        valuemap:
+          name: NFS availability state
+        description: Returns 1 only when the NFS source mounted at the expected mountpoint exactly matches the source declared in /etc/fstab.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nvar targetMount = '{#NFS_MOUNTPOINT}';\nvar targetSource = '{#NFS_SOURCE}';\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var f = lines[i].trim().split(/\\s+/);\n    if (f.length < 4) continue;\n    if ((f[2] === 'nfs' || f[2] === 'nfs4') && decodeOctal(f[1]) === targetMount) {\n        return decodeOctal(f[0]) === targetSource ? 1 : 0;\n    }\n}\nreturn 0;"
+        master_item:
+          key: vfs.file.contents[/proc/self/mounts]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+      trigger_prototypes:
+      - uuid: d7c58b853b7843d39d731744aa97b526
+        expression: last(/Linux NFS by Zabbix agent active/nfs.expected.mounted["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=0
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: last(/Linux NFS by Zabbix agent active/nfs.expected.mounted["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1
+        name: 'NFS expected [{#NFS_MOUNTPOINT}]: Filesystem is not mounted'
+        priority: HIGH
+        description: The NFS filesystem is configured as a persistent mount in /etc/fstab but no NFS/NFSv4 filesystem is currently mounted on that mountpoint.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: availability
+        - tag: nfs.expected
+          value: 'yes'
+      - uuid: cd73ba45dd7e47909d2dea95223922f8
+        expression: last(/Linux NFS by Zabbix agent active/nfs.expected.mounted["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=1 and last(/Linux NFS by Zabbix agent active/nfs.expected.source.ok["{#NFS_MOUNTPOINT}","{#NFS_SOURCE}"])=0
+        name: 'NFS expected [{#NFS_MOUNTPOINT}]: Wrong NFS source mounted'
+        priority: HIGH
+        description: An NFS filesystem is mounted at the expected mountpoint, but its source differs from the server/export configured in /etc/fstab.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: availability
+        - tag: nfs.expected
+          value: 'yes'
+      master_item:
+        key: vfs.file.contents[/etc/fstab]
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) {\n        return String.fromCharCode(parseInt(oct, 8));\n    });\n}\nfunction splitSource(source) {\n    var pos = source.indexOf(':/');\n    if (pos < 0) return {server: source, exportPath: ''};\n    var server = source.substring(0, pos);\n    var exportPath = source.substring(pos + 1);\n    if (server.length > 1 && server.charAt(0) === '[' && server.charAt(server.length - 1) === ']') {\n        server = server.substring(1, server.length - 1);\n    }\n    return {server: server, exportPath: exportPath};\n}\nvar exclude = /(^|,)(noauto|x-systemd\\.automount)(,|$)/;\nvar out = [];\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var line = lines[i].trim();\n    if (!line || line.charAt(0) === '#') continue;\n    var f = line.split(/\\s+/);\n    if (f.length < 4) continue;\n    var fstype = f[2];\n    if (fstype !== 'nfs' && fstype !== 'nfs4') continue;\n    var options = decodeOctal(f[3]);\n    if (exclude.test(options)) continue;\n    var source = decodeOctal(f[0]);\n    var mountpoint = decodeOctal(f[1]);\n    var src = splitSource(source);\n    var vm = options.match(/(?:^|,)(?:vers|nfsvers)=([^,]+)/);\n    out.push({\n        '{#NFS_SOURCE}': source,\n        '{#NFS_SERVER}': src.server,\n        '{#NFS_EXPORT}': src.exportPath,\n        '{#NFS_MOUNTPOINT}': mountpoint,\n        '{#NFS_FSTYPE}': fstype,\n        '{#NFS_VERSION}': vm ? vm[1] : (fstype === 'nfs4' ? '4' : 'unknown')\n    });\n}\nreturn JSON.stringify(out);"
+    - uuid: 0354e80813a240b38a5e6c86cedb674a
+      name: NFS servers discovery
+      type: DEPENDENT
+      key: nfs.servers.discovery
+      delay: '0'
+      description: Discovers and de-duplicates NFS servers used by active mounts. Performs client-side TCP/2049 availability and connection-time checks through the Zabbix agent.
+      lifetime: 30d
+      lifetime_type: DELETE_AFTER
+      enabled_lifetime: 1d
+      enabled_lifetime_type: DISABLE_AFTER
+      item_prototypes:
+      - uuid: c495746566ad41a0b8fd582194942a4b
+        name: 'NFS server [{#NFS_SERVER}]: TCP/2049 availability'
+        type: ZABBIX_ACTIVE
+        key: net.tcp.port["{#NFS_SERVER}",2049]
+        delay: 1m
+        history: 7d
+        trends: 90d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: scope
+          value: availability
+      - uuid: d4ae22deace343ac80ba22a331af15f0
+        name: 'NFS server [{#NFS_SERVER}]: TCP connect time'
+        type: ZABBIX_ACTIVE
+        key: net.tcp.service.perf[tcp,"{#NFS_SERVER}",2049]
+        delay: 1m
+        history: 7d
+        trends: 90d
+        value_type: FLOAT
+        units: s
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: scope
+          value: performance
+      trigger_prototypes:
+      - uuid: fa65c64ff6ba4915a5da4a5524381506
+        expression: max(/Linux NFS by Zabbix agent active/net.tcp.port["{#NFS_SERVER}",2049],3m)=0
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/net.tcp.port["{#NFS_SERVER}",2049],2m)=1
+        name: 'NFS server [{#NFS_SERVER}]: TCP/2049 is unreachable from client'
+        priority: HIGH
+        description: The monitored Linux client cannot establish a TCP connection to the NFS service. The check is performed by the client agent, not by the Zabbix server/proxy.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: scope
+          value: availability
+      - uuid: e86e563613654425a728c0bbcb20021c
+        expression: avg(/Linux NFS by Zabbix agent active/net.tcp.service.perf[tcp,"{#NFS_SERVER}",2049],5m)>{$NFS.TCP.CONNECT.WARN} and min(/Linux NFS by Zabbix agent active/net.tcp.port["{#NFS_SERVER}",2049],5m)=1
+        name: 'NFS server [{#NFS_SERVER}]: TCP connect time is high'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: scope
+          value: performance
+        description: TCP connection time to the NFS service is above {$NFS.TCP.CONNECT.WARN}. The expression already requires TCP/2049 to be reachable, so no explicit trigger dependency is required.
+      master_item:
+        key: vfs.file.contents[/proc/self/mounts]
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) {\n        return String.fromCharCode(parseInt(oct, 8));\n    });\n}\nfunction getServer(source) {\n    var pos = source.indexOf(':/');\n    var server = pos >= 0 ? source.substring(0, pos) : source;\n    if (server.length > 1 && server.charAt(0) === '[' && server.charAt(server.length - 1) === ']')\n        server = server.substring(1, server.length - 1);\n    return server;\n}\nvar out = [];\nvar seen = {};\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var line = lines[i].trim();\n    if (!line) continue;\n    var f = line.split(/\\s+/);\n    if (f.length < 4) continue;\n    if (f[2] !== 'nfs' && f[2] !== 'nfs4') continue;\n    var opts = decodeOctal(f[3]);\n    var pm = opts.match(/(?:^|,)proto=([^,]+)/);\n    var proto = pm ? pm[1] : 'tcp';\n    if (proto !== 'tcp') continue;\n    var server = getServer(decodeOctal(f[0]));\n    if (!server || seen[server]) continue;\n    seen[server] = true;\n    out.push({'{#NFS_SERVER}': server, '{#NFS_PROTO}': proto});\n}\nreturn JSON.stringify(out);"
+    - uuid: 2e61056ad62e41acacc28781256f893d
+      name: NFS performance discovery (optional)
+      type: DEPENDENT
+      key: nfs.performance.discovery
+      delay: '0'
+      lifetime: 7d
+      enabled_lifetime: 1h
+      description: Optional NFS performance discovery. Returns no entities while {$NFS.PERFORMANCE}=0, so mountstats item/trigger/graph instances are not created on hosts by default. Set {$NFS.PERFORMANCE}=1 to create client-side RPC throughput, operations, latency, queue, retransmission and error metrics for active NFS mounts.
+      item_prototypes:
+      - uuid: 48e444eb68d547edb838e1818a16e75f
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC operations per second'
+        type: DEPENDENT
+        key: nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"]
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nvar total = 0;\nfor (var k in rows) if (rows[k].length > 0 && isFinite(rows[k][0])) total += rows[k][0];\nreturn total;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ops/s
+      - uuid: 19f64457f986434f944fb6fa89122d93
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC retransmissions per second'
+        type: DEPENDENT
+        key: nfs.rpc.retrans.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nvar total = 0;\nfor (var k in rows) {\n    if (rows[k].length > 1 && isFinite(rows[k][0]) && isFinite(rows[k][1]))\n        total += Math.max(0, rows[k][1] - rows[k][0]);\n}\nreturn total;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ops/s
+      - uuid: 6dcdf94bd17349a3956b32273db2e9c9
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ operations per second'
+        type: DEPENDENT
+        key: nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"]
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nreturn rows.READ && rows.READ.length > 0 ? rows.READ[0] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ops/s
+      - uuid: 998bec78337b49a19ae42cbcb03fd998
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE operations per second'
+        type: DEPENDENT
+        key: nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"]
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nreturn rows.WRITE && rows.WRITE.length > 0 ? rows.WRITE[0] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ops/s
+      - uuid: dfba0df3b2ac4f6caab318783ce2e785
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ throughput'
+        type: DEPENDENT
+        key: nfs.rpc.read.bytes.rate["{#NFS_MOUNTPOINT}"]
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nreturn rows.READ && rows.READ.length > 4 ? rows.READ[4] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: Bps
+      - uuid: b3288ad4ee564ea5b9e3a4620de347a2
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE throughput'
+        type: DEPENDENT
+        key: nfs.rpc.write.bytes.rate["{#NFS_MOUNTPOINT}"]
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nreturn rows.WRITE && rows.WRITE.length > 3 ? rows.WRITE[3] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: Bps
+      - uuid: 978aa659ddec4c5d81545aa72486e191
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC RTT time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.rtt.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nvar total = 0;\nfor (var k in rows) if (rows[k].length > 6 && isFinite(rows[k][6])) total += rows[k][6];\nreturn total;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms
+      - uuid: d9eb2ac4d1514de1ba556988708db387
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC execution time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.exec.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction opRows(block) {\n    var rows = {};\n    var perOp = false;\n    for (var i = 0; i < block.length; i++) {\n        var line = block[i].trim();\n        if (line === 'per-op statistics') { perOp = true; continue; }\n        if (!perOp) continue;\n        var m = line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        var fields = m[2].trim().split(/\\s+/).map(function(x) { return Number(x); });\n        rows[m[1]] = fields;\n    }\n    return rows;\n}\nvar block = blockForMount(value, '{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar rows = opRows(block);\n\nvar total = 0;\nfor (var k in rows) if (rows[k].length > 7 && isFinite(rows[k][7])) total += rows[k][7];\nreturn total;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms
+      - uuid: ba5db4b9495449008fa0ab67f9e566cd
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC retransmissions, %'
+        type: CALCULATED
+        key: nfs.rpc.retrans.pct["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        params: last(//nfs.rpc.retrans.rate["{#NFS_MOUNTPOINT}"]) / (last(//nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"]) + 0.000001) * 100
+        description: Recent RPC retransmission ratio calculated from per-second counter deltas.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 4744d8bc0e324e5289f7717a547ded90
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average RPC RTT'
+        type: CALCULATED
+        key: nfs.rpc.rtt.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.rtt.ms.rate["{#NFS_MOUNTPOINT}"]) / (last(//nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"]) + 0.000001)
+        description: Average client-observed RPC round-trip time over the latest collection interval.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: b4d702ddab2f462b9560d8f97031754f
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average RPC execution time'
+        type: CALCULATED
+        key: nfs.rpc.exec.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.exec.ms.rate["{#NFS_MOUNTPOINT}"]) / (last(//nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"]) + 0.000001)
+        description: Average total RPC execution time over the latest collection interval, including queue and server/network time represented by mountstats.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 369ae8e7f79b4164ba8832840660ca72
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC queue time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.queue.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar total=0; for (var k in r) if (r[k].length>5 && isFinite(r[k][5])) total+=r[k][5]; return total;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: 9811235001174433aba04275e5d86ee5
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC errors per second'
+        type: DEPENDENT
+        key: nfs.rpc.errors.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar total=0; for (var k in r) if (r[k].length>8 && isFinite(r[k][8])) total+=r[k][8]; return total;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: errors/s
+      - uuid: 6def5a70657044ffb7034e3cb0238a66
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average RPC queue time'
+        type: CALCULATED
+        key: nfs.rpc.queue.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.queue.ms.rate["{#NFS_MOUNTPOINT}"]) / (last(//nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"]) + 0.000001)
+        description: Average time RPC requests spent queued before transmission over the latest collection interval.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 2486a4600cdf4405ae702ed9c0f17e77
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC errors, %'
+        type: CALCULATED
+        key: nfs.rpc.errors.pct["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        params: last(//nfs.rpc.errors.rate["{#NFS_MOUNTPOINT}"]) / (last(//nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"]) + 0.000001) * 100
+        description: Recent RPC operation error ratio calculated from per-second counter deltas.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: db7b51f3243847aba82eb8d9bfd7d523
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ retransmissions per second'
+        type: DEPENDENT
+        key: nfs.rpc.read.retrans.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.READ; return a && a.length>1 ? Math.max(0,a[1]-a[0]) : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: retrans/s
+      - uuid: f77929965ae84f5b97de696ddf2f0f3c
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ queue time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.read.queue.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.READ; return a && a.length>5 ? a[5] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: b00800a39bb14d50a93950312f1fcc15
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ RTT time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.read.rtt.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.READ; return a && a.length>6 ? a[6] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: acea46c71995446bb2b5ad5a12766406
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ execution time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.read.exec.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.READ; return a && a.length>7 ? a[7] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: f28d7b5d170c411eb5375c8a8eb2d243
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ errors per second'
+        type: DEPENDENT
+        key: nfs.rpc.read.errors.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.READ; return a && a.length>8 ? a[8] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: errors/s
+      - uuid: 68d75037ddcf4ea1b7827a7cdcb1b69d
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ retransmissions, %'
+        type: CALCULATED
+        key: nfs.rpc.read.retrans.pct["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        params: last(//nfs.rpc.read.retrans.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)*100
+        description: READ-specific RPC retransmission ratio.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 9205f45835444b0688be2164ceb57d1d
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average READ queue time'
+        type: CALCULATED
+        key: nfs.rpc.read.queue.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.read.queue.ms.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)
+        description: Average READ RPC queue time.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 02cd9912af1f4a95a1ac10b5414df238
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average READ RPC RTT'
+        type: CALCULATED
+        key: nfs.rpc.read.rtt.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.read.rtt.ms.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)
+        description: Average READ RPC round-trip time.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: bc5228d0d7d5434e888079d03396c302
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average READ RPC execution time'
+        type: CALCULATED
+        key: nfs.rpc.read.exec.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.read.exec.ms.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)
+        description: Average READ RPC execution time.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 5c0c3465e0094443b17d8f3b845aebbe
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ RPC errors, %'
+        type: CALCULATED
+        key: nfs.rpc.read.errors.pct["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        params: last(//nfs.rpc.read.errors.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)*100
+        description: READ-specific RPC error ratio.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 41db1b842b164c36839b2df64564f8ba
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE retransmissions per second'
+        type: DEPENDENT
+        key: nfs.rpc.write.retrans.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.WRITE; return a && a.length>1 ? Math.max(0,a[1]-a[0]) : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: retrans/s
+      - uuid: 1370eb15b436400dbc9fd9057ae5cba3
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE queue time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.write.queue.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.WRITE; return a && a.length>5 ? a[5] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: 74f0f2118cd94158aa70e3bdbc0f6a0c
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE RTT time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.write.rtt.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.WRITE; return a && a.length>6 ? a[6] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: ea518a936ef846cdb9b5684030765021
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE execution time accumulation rate'
+        type: DEPENDENT
+        key: nfs.rpc.write.exec.ms.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.WRITE; return a && a.length>7 ? a[7] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: ms/s
+      - uuid: dd48b87faa0a46fdb6b1471cf9394d2e
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE errors per second'
+        type: DEPENDENT
+        key: nfs.rpc.write.errors.rate["{#NFS_MOUNTPOINT}"]
+        history: 1h
+        trends: '0'
+        value_type: FLOAT
+        description: Derived from cumulative Linux NFS client per-operation counters in /proc/self/mountstats. Internal/intermediate metric used to derive operator-facing performance values.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - "function decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) { return String.fromCharCode(parseInt(oct, 8)); });\n}\nfunction blockForMount(text, targetMount) {\n    text = String(text || '');\n    targetMount = decodeOctal(String(targetMount || '')).trim();\n    var lines = text.split(/\\r?\\n/);\n    var start = -1;\n\n    for (var i = 0; i < lines.length; i++) {\n        var header = lines[i].trim();\n        if (header.indexOf('device ') !== 0) continue;\n\n        var mountedToken = ' mounted on ';\n        var fstypeToken = ' with fstype ';\n        var pMounted = header.indexOf(mountedToken);\n        if (pMounted < 0) continue;\n        var pFstype = header.indexOf(fstypeToken, pMounted + mountedToken.length);\n        if (pFstype < 0) continue;\n\n        var mountpoint = decodeOctal(header.substring(pMounted + mountedToken.length, pFstype)).trim();\n        var fsTail = header.substring(pFstype + fstypeToken.length).trim();\n        var fstype = fsTail.split(/\\s+/)[0];\n\n        if ((fstype === 'nfs' || fstype === 'nfs4') && mountpoint === targetMount) {\n            start = i;\n            break;\n        }\n    }\n\n    if (start < 0) return [];\n\n    var block = [];\n    for (var j = start; j < lines.length; j++) {\n        var current = lines[j];\n        if (j > start && current.trim().indexOf('device ') === 0) break;\n        block.push(current);\n    }\n    return block;\n}\nfunction rows(block) {\n    var r={}, per=false;\n    for (var i=0; i<block.length; i++) {\n        var line=block[i].trim();\n        if (line==='per-op statistics') { per=true; continue; }\n        if (!per) continue;\n        var m=line.match(/^([A-Z0-9_]+):\\s+(.+)$/);\n        if (!m) continue;\n        r[m[1]]=m[2].trim().split(/\\s+/).map(function(x){return Number(x);});\n    }\n    return r;\n}\nvar block=blockForMount(value,'{#NFS_MOUNTPOINT}');\nif (!block.length) throw 'NFS mount not found in /proc/self/mountstats';\nvar r=rows(block);\nvar a=r.WRITE; return a && a.length>8 ? a[8] : 0;"
+          error_handler: DISCARD_VALUE
+        - type: CHANGE_PER_SECOND
+        master_item:
+          key: vfs.file.contents[/proc/self/mountstats]
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        units: errors/s
+      - uuid: 78ab40f8397e40ef9161b6ba48f2e230
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE retransmissions, %'
+        type: CALCULATED
+        key: nfs.rpc.write.retrans.pct["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        params: last(//nfs.rpc.write.retrans.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)*100
+        description: WRITE-specific RPC retransmission ratio.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 12c456486b9a450ba527a8a0974ce2f7
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average WRITE queue time'
+        type: CALCULATED
+        key: nfs.rpc.write.queue.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.write.queue.ms.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)
+        description: Average WRITE RPC queue time.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 4d0b1992f73a44b0a22968bafff95319
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average WRITE RPC RTT'
+        type: CALCULATED
+        key: nfs.rpc.write.rtt.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.write.rtt.ms.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)
+        description: Average WRITE RPC round-trip time.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 2aaa291253b5428c880ab6001b146d7d
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Average WRITE RPC execution time'
+        type: CALCULATED
+        key: nfs.rpc.write.exec.avg["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: ms
+        params: last(//nfs.rpc.write.exec.ms.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)
+        description: Average WRITE RPC execution time.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 4ec365565cbb41988fda31ca2eb1a0ff
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE RPC errors, %'
+        type: CALCULATED
+        key: nfs.rpc.write.errors.pct["{#NFS_MOUNTPOINT}"]
+        delay: 1m
+        history: 7d
+        trends: 365d
+        value_type: FLOAT
+        units: '%'
+        params: last(//nfs.rpc.write.errors.rate["{#NFS_MOUNTPOINT}"])/(last(//nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"])+0.000001)*100
+        description: WRITE-specific RPC error ratio.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      trigger_prototypes:
+      - uuid: f9d84a36d46b417fa85081d0015047bd
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.retrans.pct["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.RETRANS.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC retransmissions are high'
+        priority: WARNING
+        description: Client-side NFS RPC retransmission percentage is elevated. This usually points to packet loss, congestion, server stalls or an unhealthy network path.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 743cafccb7ec4a85bc07b5b1000e4f88
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.rtt.avg["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.RTT.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC round-trip latency is high'
+        priority: WARNING
+        description: Average client-observed RPC round-trip latency is above the configured threshold while the mount is active.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: 2dd2a75b7f9c442fbcaf4bb2f5399075
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.exec.avg["{#NFS_MOUNTPOINT}"],5m)>100 and avg(/Linux NFS by Zabbix agent active/nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC execution latency is high'
+        priority: WARNING
+        description: Average NFS RPC execution time is above the configured threshold while the mount is active.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: a90309b4ca814a8a932988ba9d480530
+        expression: nodata(/Linux NFS by Zabbix agent active/nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"],10m)=1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: mountstats performance data is unavailable'
+        priority: INFO
+        description: The mount is present but no /proc/self/mountstats-derived performance data has been received for 10 minutes.
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+      - uuid: e91af8c02d2f4b068aec2988fc1a8311
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.queue.avg["{#NFS_MOUNTPOINT}"],5m)>50 and avg(/Linux NFS by Zabbix agent active/nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC queue time is high'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        description: RPC requests are spending excessive time queued on the client before network transmission.
+      - uuid: d39bf01eef9a4edcb378bf8279f31b11
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.errors.pct["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.ERROR.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC error rate is high'
+        priority: AVERAGE
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        description: NFS RPC operations are completing with errors above the configured threshold.
+      - uuid: 03f4c79a403e47ac8cf1d9eed1d86dd9
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.read.rtt.avg["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.RTT.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ RPC latency is high'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        description: READ-specific RPC round-trip latency is high.
+      - uuid: 6e4301d0acd04a8cb79c6891092d2fca
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.write.rtt.avg["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.RTT.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE RPC latency is high'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        description: WRITE-specific RPC round-trip latency is high.
+      - uuid: 61b9c1dae4b44197adcb43a2d1d6e33a
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.read.errors.pct["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.ERROR.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.read.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ RPC errors are high'
+        priority: AVERAGE
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        description: READ operations are returning RPC errors above the configured threshold.
+      - uuid: 3c34224bc5fb4c508218c1e40a58a49c
+        expression: avg(/Linux NFS by Zabbix agent active/nfs.rpc.write.errors.pct["{#NFS_MOUNTPOINT}"],5m)>{$NFS.RPC.ERROR.WARN} and avg(/Linux NFS by Zabbix agent active/nfs.rpc.write.ops.rate["{#NFS_MOUNTPOINT}"],5m)>0.1
+        name: 'NFS [{#NFS_MOUNTPOINT}]: WRITE RPC errors are high'
+        priority: AVERAGE
+        tags:
+        - tag: component
+          value: nfs
+        - tag: nfs.server
+          value: '{#NFS_SERVER}'
+        - tag: nfs.export
+          value: '{#NFS_EXPORT}'
+        - tag: nfs.mountpoint
+          value: '{#NFS_MOUNTPOINT}'
+        - tag: nfs.version
+          value: '{#NFS_VERSION}'
+        - tag: scope
+          value: performance
+        description: WRITE operations are returning RPC errors above the configured threshold.
+      graph_prototypes:
+      - uuid: 0f9bcdfb564d4985aae3ea80efe1e1e5
+        name: 'NFS [{#NFS_MOUNTPOINT}]: Throughput'
+        graph_items:
+        - color: 1A7C11
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.read.bytes.rate["{#NFS_MOUNTPOINT}"]
+        - sortorder: '1'
+          color: 2774A4
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.write.bytes.rate["{#NFS_MOUNTPOINT}"]
+      - uuid: be6655ecd74f455cb26767450f2819c8
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC latency'
+        graph_items:
+        - color: 1A7C11
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.rtt.avg["{#NFS_MOUNTPOINT}"]
+        - sortorder: '1'
+          color: F63100
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.exec.avg["{#NFS_MOUNTPOINT}"]
+      - uuid: 197b1384ef0b43ae91bb64ebde4949fe
+        name: 'NFS [{#NFS_MOUNTPOINT}]: READ/WRITE RPC latency'
+        graph_items:
+        - color: 199C0D
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.read.rtt.avg["{#NFS_MOUNTPOINT}"]
+        - sortorder: '1'
+          color: F63100
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.write.rtt.avg["{#NFS_MOUNTPOINT}"]
+        - sortorder: '2'
+          color: 2774A4
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.read.exec.avg["{#NFS_MOUNTPOINT}"]
+        - sortorder: '3'
+          color: A54F10
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.write.exec.avg["{#NFS_MOUNTPOINT}"]
+      - uuid: 750304c65a614f75ba8f70c45a5bc37f
+        name: 'NFS [{#NFS_MOUNTPOINT}]: RPC quality'
+        graph_items:
+        - color: F63100
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.retrans.pct["{#NFS_MOUNTPOINT}"]
+        - sortorder: '1'
+          color: A54F10
+          item:
+            host: Linux NFS by Zabbix agent active
+            key: nfs.rpc.errors.pct["{#NFS_MOUNTPOINT}"]
+      master_item:
+        key: vfs.file.contents[/proc/self/mounts]
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - "if ('{$NFS.PERFORMANCE}' !== '1') return '[]';\nfunction decodeOctal(s) {\n    return s.replace(/\\\\([0-7]{3})/g, function(_, oct) {\n        return String.fromCharCode(parseInt(oct, 8));\n    });\n}\nfunction splitSource(source) {\n    var pos = source.indexOf(':/');\n    if (pos < 0) return {server: source, exportPath: ''};\n    var server = source.substring(0, pos);\n    var exportPath = source.substring(pos + 1);\n    if (server.length > 1 && server.charAt(0) === '[' && server.charAt(server.length - 1) === ']')\n        server = server.substring(1, server.length - 1);\n    return {server: server, exportPath: exportPath};\n}\nfunction opt(options, name) {\n    var re = new RegExp('(?:^|,)' + name + '=([^,]+)');\n    var m = options.match(re);\n    return m ? m[1] : '';\n}\nvar out = [];\nvar lines = value.split(/\\r?\\n/);\nfor (var i = 0; i < lines.length; i++) {\n    var line = lines[i].trim();\n    if (!line) continue;\n    var f = line.split(/\\s+/);\n    if (f.length < 4) continue;\n    var source = decodeOctal(f[0]);\n    var mountpoint = decodeOctal(f[1]);\n    var fstype = f[2];\n    var options = decodeOctal(f[3]);\n    if (fstype !== 'nfs' && fstype !== 'nfs4') continue;\n    var src = splitSource(source);\n    var version = opt(options, 'vers') || opt(options, 'nfsvers') || (fstype === 'nfs4' ? '4' : 'unknown');\n    var proto = opt(options, 'proto') || 'tcp';\n    var mountaddr = opt(options, 'mountaddr') || src.server;\n    var mountport = opt(options, 'mountport');\n    var mountproto = opt(options, 'mountproto') || proto;\n    out.push({\n        '{#NFS_SOURCE}': source,\n        '{#NFS_SERVER}': src.server,\n        '{#NFS_EXPORT}': src.exportPath,\n        '{#NFS_MOUNTPOINT}': mountpoint,\n        '{#NFS_FSTYPE}': fstype,\n        '{#NFS_VERSION}': version,\n        '{#NFS_PROTO}': proto,\n        '{#NFS_MOUNTADDR}': mountaddr,\n        '{#NFS_MOUNTPORT}': mountport,\n        '{#NFS_MOUNTPROTO}': mountproto\n    });\n}\nreturn JSON.stringify(out);"
+    - uuid: 374d6bac7df84f7691e41e42e0741fa7
+      name: NFSv3 RPC deep endpoints discovery
+      type: DEPENDENT
+      key: nfs.v3.rpc.deep.endpoints.discovery
+      delay: '0'
+      description: Optional functional NFSv3 RPC validation. Returns no entities while {$NFS.RPC.DEEP}=0. When enabled, runs tightly-scoped rpcinfo checks for rpcbind TCP/UDP, NFSv3 TCP and NLM TCP. Requires rpcinfo plus the documented Zabbix Agent AllowKey.
+      lifetime: 30d
+      lifetime_type: DELETE_AFTER
+      enabled_lifetime: 1d
+      enabled_lifetime_type: DISABLE_AFTER
+      item_prototypes:
+      - uuid: faa1462f3df348f3a18ffb87261307ad
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: rpcbind TCP functional'
+        type: ZABBIX_ACTIVE
+        key: system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T tcp 100000 4",wait]
+        delay: 2m
+        history: 1d
+        trends: 30d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        - tag: nfs.server
+          value: '{#NFS_MOUNTADDR}'
+        - tag: nfs.version
+          value: '3'
+        description: RPC NULL-procedure functional test of rpcbind v4 over TCP/111 using an explicit universal address.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - 'return /ready and waiting/i.test(value) ? 1 : 0;'
+      - uuid: c1e8ad5e6b98449fbe95ce6e3177fdfa
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: rpcbind UDP functional'
+        type: ZABBIX_ACTIVE
+        key: system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T udp 100000 4",wait]
+        delay: 2m
+        history: 1d
+        trends: 30d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        - tag: nfs.server
+          value: '{#NFS_MOUNTADDR}'
+        - tag: nfs.version
+          value: '3'
+        description: RPC NULL-procedure functional test of rpcbind v4 over UDP/111 using an explicit universal address.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - 'return /ready and waiting/i.test(value) ? 1 : 0;'
+      - uuid: c9acbf44032446e79197202d2e2adc0b
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: NFSv3 TCP functional'
+        type: ZABBIX_ACTIVE
+        key: system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_2049} -T tcp 100003 3",wait]
+        delay: 2m
+        history: 1d
+        trends: 30d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        - tag: nfs.server
+          value: '{#NFS_MOUNTADDR}'
+        - tag: nfs.version
+          value: '3'
+        description: RPC NULL-procedure functional test of NFS program 100003 version 3 over TCP/2049.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - 'return /ready and waiting/i.test(value) ? 1 : 0;'
+      - uuid: 79cea4c10e8f4a958277a3558c41b748
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: NLM TCP functional'
+        type: ZABBIX_ACTIVE
+        key: system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -T tcp {#NFS_MOUNTADDR} 100021 4",wait]
+        delay: 2m
+        history: 1d
+        trends: 30d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        - tag: nfs.server
+          value: '{#NFS_MOUNTADDR}'
+        - tag: nfs.version
+          value: '3'
+        description: Functional RPC test of Network Lock Manager program 100021 version 4 over TCP. The actual registered NLM port is resolved through rpcbind.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - 'return /ready and waiting/i.test(value) ? 1 : 0;'
+      trigger_prototypes:
+      - uuid: 712396af7d5f44f3bfe0d5ed47070083
+        expression: max(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T tcp 100000 4",wait],5m)=0
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: rpcbind TCP functional check failed'
+        priority: HIGH
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: rpcbind TCP accepts the network path check but the RPC service itself did not answer the functional NULL call.
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T tcp 100000 4",wait],2m)=1
+      - uuid: 9572a7251d524f59b85c709b1e57ea6b
+        expression: max(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T udp 100000 4",wait],5m)=0
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: rpcbind UDP functional check failed'
+        priority: HIGH
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: UDP rpcbind functional test failed. Enable this alert when UDP RPC coverage is required by the storage platform.
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T udp 100000 4",wait],2m)=1
+      - uuid: 422ed625850641668670d1d799aeac80
+        expression: max(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_2049} -T tcp 100003 3",wait],5m)=0
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: NFSv3 TCP functional check failed'
+        priority: HIGH
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: The RPC NFSv3 service on TCP/2049 did not answer a functional RPC NULL call.
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_2049} -T tcp 100003 3",wait],2m)=1
+      - uuid: e878bd5b1c9c465f8807cca6e8592fa7
+        expression: max(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -T tcp {#NFS_MOUNTADDR} 100021 4",wait],5m)=0
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: NLM TCP functional check failed'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: Network Lock Manager RPC program 100021 version 4 did not answer over TCP. Enable this alert where NLM is required.
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -T tcp {#NFS_MOUNTADDR} 100021 4",wait],2m)=1
+      - uuid: acde263fad0d4fe387bc1a2c8882b13a
+        expression: nodata(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_UADDR_111} -T tcp 100000 4",wait],10m)=1
+        name: 'NFSv3 RPC deep [{#NFS_MOUNTADDR}]: deep checks unavailable'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: No RPC deep-check data has been received. Verify rpcinfo is installed and system.run for the rpcinfo command is whitelisted on the Zabbix agent.
+      master_item:
+        key: vfs.file.contents[/proc/self/mounts]
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - "if ('{$NFS.RPC.DEEP}' !== '1') return '[]';\nfunction decodeOctal(s){return s.replace(/\\\\([0-7]{3})/g,function(_,o){return String.fromCharCode(parseInt(o,8));});}\nfunction sourceServer(source){var p=source.indexOf(':/');var s=p>=0?source.substring(0,p):source;if(s.length>1&&s.charAt(0)==='['&&s.charAt(s.length-1)===']')s=s.substring(1,s.length-1);return s;}\nfunction ipv4(s){if(!/^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(s))return false;var a=s.split('.');for(var i=0;i<4;i++){var n=Number(a[i]);if(n<0||n>255)return false;}return true;}\nfunction uaddr(ip,port){return ip+'.'+Math.floor(port/256)+'.'+(port%256);}\nvar out=[],seen={},lines=value.split(/\\r?\\n/);\nfor(var i=0;i<lines.length;i++){\n var f=lines[i].trim().split(/\\s+/); if(f.length<4||(f[2]!=='nfs'&&f[2]!=='nfs4'))continue;\n var opts=decodeOctal(f[3]); var vm=opts.match(/(?:^|,)(?:vers|nfsvers)=([^,]+)/); var ver=vm?vm[1]:(f[2]==='nfs4'?'4':'unknown'); if(ver.charAt(0)!=='3')continue;\n var am=opts.match(/(?:^|,)mountaddr=([^,]+)/); var addr=am?am[1]:sourceServer(decodeOctal(f[0])); if(!ipv4(addr)||seen[addr])continue;\n seen[addr]=1; out.push({'{#NFS_MOUNTADDR}':addr,'{#NFS_UADDR_111}':uaddr(addr,111),'{#NFS_UADDR_2049}':uaddr(addr,2049)});\n}\nreturn JSON.stringify(out);"
+    - uuid: 9d8eddd266784a14a3d40e26ea093741
+      name: NFSv3 RPC deep mountd discovery
+      type: DEPENDENT
+      key: nfs.v3.rpc.deep.mountd.discovery
+      delay: '0'
+      description: Optional functional NFSv3 mountd validation. Returns no entities while {$NFS.RPC.DEEP}=0. Uses the effective mountd port discovered from active mount options and an explicit RPC universal address for TCP and UDP checks.
+      lifetime: 30d
+      lifetime_type: DELETE_AFTER
+      enabled_lifetime: 1d
+      enabled_lifetime_type: DISABLE_AFTER
+      item_prototypes:
+      - uuid: 21c2e0024ac345169699e838114fb868
+        name: 'NFSv3 RPC deep mountd [{#NFS_MOUNTADDR}:{#NFS_MOUNTPORT}]: TCP functional'
+        type: ZABBIX_ACTIVE
+        key: system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_MOUNTD_UADDR} -T tcp 100005 3",wait]
+        delay: 2m
+        history: 1d
+        trends: 30d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        - tag: nfs.server
+          value: '{#NFS_MOUNTADDR}'
+        - tag: nfs.version
+          value: '3'
+        description: Functional RPC NULL call to mountd program 100005 version 3 over TCP on the dynamically discovered mount port.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - 'return /ready and waiting/i.test(value) ? 1 : 0;'
+      - uuid: 7cbea7b65a0b48e795d143b1f2557b00
+        name: 'NFSv3 RPC deep mountd [{#NFS_MOUNTADDR}:{#NFS_MOUNTPORT}]: UDP functional'
+        type: ZABBIX_ACTIVE
+        key: system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_MOUNTD_UADDR} -T udp 100005 3",wait]
+        delay: 2m
+        history: 1d
+        trends: 30d
+        valuemap:
+          name: NFS availability state
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        - tag: nfs.server
+          value: '{#NFS_MOUNTADDR}'
+        - tag: nfs.version
+          value: '3'
+        description: Functional RPC NULL call to mountd program 100005 version 3 over UDP on the dynamically discovered mount port. Uses an explicit universal address to avoid wildcard rpcbind replies.
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - 'return /ready and waiting/i.test(value) ? 1 : 0;'
+      trigger_prototypes:
+      - uuid: d29927678664446e95c0fefb5b31791b
+        expression: max(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_MOUNTD_UADDR} -T tcp 100005 3",wait],5m)=0
+        name: 'NFSv3 RPC deep mountd [{#NFS_MOUNTADDR}:{#NFS_MOUNTPORT}]: TCP functional check failed'
+        priority: HIGH
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: The mountd RPC service did not answer over TCP on the port negotiated by the current NFSv3 mount.
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_MOUNTD_UADDR} -T tcp 100005 3",wait],2m)=1
+      - uuid: d0bcaa6b9e62485ebda357c8ee94f2ce
+        expression: max(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_MOUNTD_UADDR} -T udp 100005 3",wait],5m)=0
+        name: 'NFSv3 RPC deep mountd [{#NFS_MOUNTADDR}:{#NFS_MOUNTPORT}]: UDP functional check failed'
+        priority: WARNING
+        tags:
+        - tag: component
+          value: nfs
+        - tag: scope
+          value: rpc-deep
+        description: The mountd RPC service did not answer over UDP on the discovered port. Enable this alert where UDP mountd is required.
+        recovery_mode: RECOVERY_EXPRESSION
+        recovery_expression: min(/Linux NFS by Zabbix agent active/system.run["/usr/bin/timeout 2s /usr/sbin/rpcinfo -a {#NFS_MOUNTD_UADDR} -T udp 100005 3",wait],2m)=1
+      master_item:
+        key: vfs.file.contents[/proc/self/mounts]
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - "if ('{$NFS.RPC.DEEP}' !== '1') return '[]';\nfunction decodeOctal(s){return s.replace(/\\\\([0-7]{3})/g,function(_,o){return String.fromCharCode(parseInt(o,8));});}\nfunction sourceServer(source){var p=source.indexOf(':/');var s=p>=0?source.substring(0,p):source;if(s.length>1&&s.charAt(0)==='['&&s.charAt(s.length-1)===']')s=s.substring(1,s.length-1);return s;}\nfunction ipv4(s){if(!/^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(s))return false;var a=s.split('.');for(var i=0;i<4;i++){var n=Number(a[i]);if(n<0||n>255)return false;}return true;}\nfunction uaddr(ip,port){return ip+'.'+Math.floor(port/256)+'.'+(port%256);}\nvar out=[],seen={},lines=value.split(/\\r?\\n/);\nfor(var i=0;i<lines.length;i++){\n var f=lines[i].trim().split(/\\s+/); if(f.length<4||(f[2]!=='nfs'&&f[2]!=='nfs4'))continue;\n var opts=decodeOctal(f[3]); var vm=opts.match(/(?:^|,)(?:vers|nfsvers)=([^,]+)/); var ver=vm?vm[1]:(f[2]==='nfs4'?'4':'unknown'); if(ver.charAt(0)!=='3')continue;\n var pm=opts.match(/(?:^|,)mountport=([0-9]+)/); if(!pm)continue; var port=Number(pm[1]); if(port<1||port>65535)continue;\n var am=opts.match(/(?:^|,)mountaddr=([^,]+)/); var addr=am?am[1]:sourceServer(decodeOctal(f[0])); if(!ipv4(addr))continue;\n var key=addr+':'+port; if(seen[key])continue; seen[key]=1;\n out.push({'{#NFS_MOUNTADDR}':addr,'{#NFS_MOUNTPORT}':String(port),'{#NFS_MOUNTD_UADDR}':uaddr(addr,port)});\n}\nreturn JSON.stringify(out);"
+    macros:
+    - macro: '{$NFS.SPACE.WARN}'
+      value: '80'
+      description: Warning threshold for NFS used space percentage. Supports context by mountpoint.
+    - macro: '{$NFS.SPACE.CRIT}'
+      value: '90'
+      description: High-severity threshold for NFS used space percentage. Supports context by mountpoint.
+    - macro: '{$NFS.MIN.FREE}'
+      value: 5G
+      description: Minimum free space before a high-severity capacity alert. Supports context by mountpoint.
+    - macro: '{$NFS.FORECAST.DAYS}'
+      value: 7d
+      description: Warn when linear prediction estimates that free space will reach zero within this horizon.
+    - macro: '{$NFS.TCP.CONNECT.WARN}'
+      value: '0.5'
+      description: Warning threshold, in seconds, for the client-side TCP connection time to NFS TCP/2049.
+    - macro: '{$NFS.RPC.RTT.WARN}'
+      value: '50'
+      description: 'Performance mode: warning threshold for average NFS RPC round-trip time, in milliseconds.'
+    - macro: '{$NFS.RPC.RETRANS.WARN}'
+      value: '5'
+      description: 'Performance mode: warning threshold for RPC retransmissions, in percent.'
+    - macro: '{$NFS.RPC.ERROR.WARN}'
+      value: '1'
+      description: 'Performance mode: warning threshold for RPC errors, in percent.'
+    - macro: '{$NFS.PERFORMANCE}'
+      value: '0'
+      description: Set to 1 to create optional /proc/self/mountstats performance items, triggers and graphs.
+    - macro: '{$NFS.RPC.DEEP}'
+      value: '0'
+      description: Set to 1 to create functional NFSv3 rpcinfo checks. Requires rpcinfo and the documented Agent AllowKey.
+    valuemaps:
+    - uuid: 229edcd5169a434783f992bdacac2e5c
+      name: NFS availability state
+      mappings:
+      - value: '0'
+        newvalue: Down
+      - value: '1'
+        newvalue: Up
+    - uuid: eb1a038d5c7c4eb29c4501f6102d2fde
+      name: NFS read-only state
+      mappings:
+      - value: '0'
+        newvalue: Read-write
+      - value: '1'
+        newvalue: Read-only
+    - uuid: 1f3f2b1e0235414b889cd38e2fccf69b
+      name: NFS definition state
+      mappings:
+      - value: '0'
+        newvalue: Unmanaged/not in fstab
+      - value: '1'
+        newvalue: Defined in fstab
+    - uuid: 99976b2943b149adacecbb58e93929ff
+      name: NFS soft mount state
+      mappings:
+      - value: '0'
+        newvalue: Hard/reliable
+      - value: '1'
+        newvalue: Soft/softerr
+    - uuid: 6fe8d0ee3c6e452a9c9f45c7b7ab63ea
+      name: NFS UDP transport state
+      mappings:
+      - value: '0'
+        newvalue: TCP/other
+      - value: '1'
+        newvalue: UDP
+    - uuid: 0501af1d83a94c77b0bfb015795d6fd3
+      name: NFSv3 native remount coverage
+      mappings:
+      - value: '0'
+        newvalue: Not applicable (not NFSv3)
+      - value: '1'
+        newvalue: Complete native TCP validation
+      - value: '2'
+        newvalue: Partial validation only
